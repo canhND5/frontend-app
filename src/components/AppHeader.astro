@@ -1,0 +1,32 @@
+---
+interface Props {
+  showBack?: boolean;
+  backHref?: string;
+}
+
+const { showBack = false, backHref = '/' } = Astro.props;
+---
+
+<div class="navbar bg-primary text-primary-content min-h-12 px-3 shrink-0">
+  <>
+      <div class="navbar-start">
+        {showBack ? (
+           
+          <a href={backHref} class="btn btn-ghost btn-sm btn-circle text-primary-content/90 hover:text-primary-content">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+            </svg>
+          </a>) : (
+            <span class="text-lg font-extrabold tracking-tight"></span>
+          )}
+      </div>
+      <div class="navbar-end" >
+        <span class="font-bold"> This website could be blocked in the future, <br>this is backup website:
+        <a href="https://www.astro-articles.com" class="text-primary-content/90 hover:text-primary-content underline">https://www.astro-articles.com</a> 
+      </span>
+      </div>
+    </>
+   
+  
+  
+</div>

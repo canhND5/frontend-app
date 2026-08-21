@@ -1,0 +1,80 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import AppHeader from '@/components/AppHeader.astro';
+import EditorialSection from '@/components/home/EditorialSection.astro';
+import { fetchOstayBlogArticles } from '@/lib/ostay-api';
+import { findEditorialSlug } from '@/lib/editorial-config';
+import { encryptText } from '@/lib/aes';
+import { proxyImageUrl } from '@/lib/img-proxy';
+import { env } from 'cloudflare:workers';
+
+const { slug } = Astro.params;
+const aesKey = process.env.AES_SECRET_KEY ?? '';
+
+// Validate slug against R2 list (skip in dev where bucket is unavailable)
+const bucket = (env as Partial<Env>).CMS_MANIFEST;
+const entry = bucket ? await findEditorialSlug(bucket, slug ?? '') : null;
+
+// In dev mode (no bucket), allow any slug so content is previewable locally
+const isDev = !bucket;
+
+if (!isDev && !entry) {
+  return new Response(null, { status: 404 });
+}
+
+type EditorialItem = { type: 'header' | 'article' | 'video'; title: string; sourceName: string | null; imageUrl: string | null; href: string | null };
+type Edition = { date: string; dateValue: string; items: EditorialItem[] };
+
+let editions: Edition[] = [];
+let fetchError: string | null = null;
+
+try {
+  const { data } = await fetchOstayBlogArticles();
+  editions = await Promise.all(
+    data.filter((edition) => edition.items.length > 0).map(async (edition) => {
+      const d = new Date(edition.date);
+      const date = `${d.getMonth() + 1}月${d.getDate()}日`;
+      const items = await Promise.all(
+      edition.items.map(async (item): Promise<EditorialItem> => {
+          if (!item.id || !item.source) {
+            return { type: 'header', title: item.title, sourceName: null, imageUrl: null, href: null };
+          }
+          return {
+            type: item.contentType === 'video' ? 'video' : 'article',
+            title: await encryptText(item.title, aesKey),
+            sourceName: item.sourceName,
+            imageUrl: proxyImageUrl(item.imageUrl, item.source),
+            href: `/content/${item.source}/${item.id}`,
+          };
+          })
+      );
+      return { date, dateValue: edition.date, items };
+    })
+  );
+} catch (e) {
+  fetchError = e instanceof Error ? e.message : String(e);
+}
+
+Astro.response.headers.set('Cache-Control', 'public, max-age=120, s-maxage=600, stale-while-revalidate=120');
+---
+
+<AppLayout
+  title="編輯精選"
+  activeTab="home"
+  ogTitle={entry?.ogTitle}
+  ogDescription={entry?.ogDescription}
+>
+  <div class="sticky top-0 z-40 shrink-0">
+    <AppHeader showBack backHref="/" />
+  </div>
+
+  <main class="flex-1 overflow-y-auto pb-6">
+    {fetchError ? (
+      <p class="px-4 py-6 text-sm text-error">{fetchError}</p>
+    ) : (
+      editions.map((edition) => (
+        <EditorialSection items={edition.items} date={edition.date} dateValue={edition.dateValue} error={null} />
+      ))
+    )}
+  </main>
+</AppLayout>

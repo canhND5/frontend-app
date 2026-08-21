@@ -1,0 +1,86 @@
+---
+interface Item {
+  type: 'header' | 'article' | 'video';
+  title: string;
+  sourceName: string | null;
+  imageUrl: string | null;
+  href: string | null;
+}
+
+interface Props {
+  items: Item[];
+  date: string;
+  dateValue?: string;
+  error: string | null;
+  moreHref?: string;
+}
+
+const { items, date, dateValue, error, moreHref } = Astro.props;
+---
+
+<section class="px-3 pt-4 pb-1">
+  <div class="flex items-center justify-between mb-2">
+    <span class="text-sm font-bold text-base-content/70 uppercase tracking-wider">編輯精選</span>
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-3">
+      <span class="text-sm text-base-content/50" data-local-month-day={dateValue}>{date}</span>
+      {moreHref && <a href={moreHref} class="text-sm text-primary font-semibold">更多 →</a>}
+    </div>
+    </div>
+  </div>
+
+  {error ? (
+    <p class="py-4 text-sm text-error">{error}</p>
+  ) : (
+    <div class="flex flex-col gap-2.5">
+      {items.map((item) => {
+        if (item.type === 'header') {
+          return (
+            <div class="flex items-center gap-2 pt-1">
+              <span class="text-[13px] font-bold text-primary">{item.title}</span>
+              <div class="flex-1 h-px bg-base-300" />
+            </div>
+          );
+        }
+
+        if (item.type === 'video') {
+          return (
+            <a href={item.href ?? '#'}
+               class="relative aspect-video bg-linear-to-br from-[#0f1e3a] to-[#1a3a6a] flex items-center justify-center overflow-hidden rounded-xl">
+              {item.imageUrl && (
+                <img src={item.imageUrl} alt="" loading="lazy" class="absolute inset-0 w-full h-full object-cover" />
+              )}
+              <span class="relative z-10 w-11 h-11 bg-white/90 rounded-full flex items-center justify-center text-primary shadow-md">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 translate-x-0.5">
+                  <path fill-rule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clip-rule="evenodd" />
+                </svg>
+              </span>
+              <div class="absolute bottom-0 left-0 right-0 bg-linear-to-t from-black/70 to-transparent px-2.5 pb-2 pt-5 z-10">
+                <p class="text-white text-[16px] font-bold leading-[1.35] line-clamp-2" data-enc>{item.title}</p>
+                {item.sourceName && (
+                  <span class="text-white/70 text-[13px] mt-0.5 block">{item.sourceName}</span>
+                )}
+              </div>
+            </a>
+          );
+        }
+
+        return (
+          <a href={item.href ?? '#'} class="card card-sm bg-base-100 shadow-sm block overflow-hidden">
+            <div class="flex gap-3 p-3">
+              <div class="flex-1 min-w-0">
+                {item.sourceName && (
+                  <span class="text-xs text-base-content/50">{item.sourceName}</span>
+                )}
+                <p class="text-[16px] lg:text-[18px] font-bold text-base-content leading-[1.4] mt-0.5 line-clamp-3" data-enc>{item.title}</p>
+              </div>
+              {item.imageUrl && (
+                <img src={item.imageUrl} alt="" loading="lazy" class="w-32 aspect-4/3 object-cover shrink-0" />
+              )}
+            </div>
+          </a>
+        );
+      })}
+    </div>
+  )}
+</section>

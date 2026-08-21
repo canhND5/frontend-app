@@ -1,0 +1,366 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import AppHeader from '@/components/AppHeader.astro';
+import { fetchXTimelines, fetchXUsers } from '@/lib/proxy-api';
+import { proxyXImageUrl } from '@/lib/img-proxy';
+import { encryptText } from '@/lib/aes';
+import { timeAgo } from '@/lib/format';
+
+const token = process.env.API_AUTH_TOKEN ?? '';
+const aesKey = process.env.AES_SECRET_KEY ?? '';
+
+type QuotedPost = {
+  authorUsername: string;
+  authorName: string;
+  text: string;
+};
+
+type TweetCard = {
+  id: string;
+  authorUsername: string;
+  authorName: string;
+  authorAvatarUrl: string | null;
+  text: string;
+  timeAgo: string;
+  dateValue?: string;
+  likeCount: number;
+  retweetCount: number;
+  replyCount: number;
+  thumbUrl: string | null;
+  fullImageUrl: string | null;
+  videoSrc: string | null;
+  hasVideo: boolean;
+  isRetweet: boolean;
+  quotedPost: QuotedPost | null;
+};
+
+type AuthorEntry = {
+  username: string;
+  name: string;
+  avatarUrl: string | null;
+};
+
+let tweets: TweetCard[] = [];
+let authors: AuthorEntry[] = [];
+let fetchError: string | null = null;
+
+try {
+  const { data: timelineData } = await fetchXTimelines(token, { pageSize: 60 });
+
+  try {
+    const { data: usersData } = await fetchXUsers(token);
+    authors = usersData.items.map(u => ({
+      username: u.username,
+      name: u.name,
+      avatarUrl: u.profile_image_url ?? null,
+    }));
+  } catch {
+    const authorMap = new Map<string, AuthorEntry>();
+    for (const post of timelineData.items) {
+      const u = post.author;
+      if (u?.username && !authorMap.has(u.username)) {
+        authorMap.set(u.username, { username: u.username, name: u.name ?? u.username, avatarUrl: u.profile_image_url ?? null });
+      }
+    }
+    authors = Array.from(authorMap.values());
+  }
+
+  tweets = await Promise.all(
+    timelineData.items.map(async (post) => {
+      const displayText = post.note_tweet?.text ?? post.text ?? '';
+      const firstMedia = post.media?.[0] ?? null;
+      const hasVideo = firstMedia?.type === 'video' || firstMedia?.type === 'animated_gif';
+      const thumbUrl = proxyXImageUrl(firstMedia?.preview_image_url ?? firstMedia?.url);
+      const fullImageUrl = !hasVideo ? proxyXImageUrl(firstMedia?.url ?? firstMedia?.preview_image_url) : null;
+
+      const retweetRef = post.referencedPosts?.find(r => r.referenceType === 'retweeted') ?? null;
+      const quotedRef = post.referencedPosts?.find(r => r.referenceType === 'quoted') ?? null;
+
+      let quotedPost: QuotedPost | null = null;
+      if (quotedRef) {
+        const qText = quotedRef.note_tweet?.text ?? quotedRef.text ?? '';
+        quotedPost = {
+          authorUsername: quotedRef.author?.username ?? '',
+          authorName: quotedRef.author?.name ?? '',
+          text: await encryptText(qText, aesKey),
+        };
+      }
+
+      return {
+        id: post.id,
+        authorUsername: post.author?.username ?? '',
+        authorName: post.author?.name ?? '',
+        authorAvatarUrl: proxyXImageUrl(post.author?.profile_image_url),
+        text: await encryptText(displayText, aesKey),
+        timeAgo: timeAgo(post.created_at),
+        dateValue: post.created_at ?? undefined,
+        likeCount: post.public_metrics?.like_count ?? 0,
+        retweetCount: post.public_metrics?.retweet_count ?? 0,
+        replyCount: post.public_metrics?.reply_count ?? 0,
+        thumbUrl,
+        fullImageUrl,
+        videoSrc: hasVideo
+          ? (() => {
+              const best = (firstMedia.variants ?? [])
+                .filter(v => v.content_type === 'video/mp4' && v.url)
+                .sort((a, b) => (b.bit_rate ?? 0) - (a.bit_rate ?? 0))[0];
+              return best?.url ? proxyXImageUrl(best.url) : (firstMedia.url ? proxyXImageUrl(firstMedia.url) : null);
+            })()
+          : null,
+        hasVideo,
+        isRetweet: !!retweetRef,
+        quotedPost,
+      };
+    })
+  );
+} catch (e) {
+  fetchError = e instanceof Error ? e.message : String(e);
+}
+
+const PAGE = 20;
+
+Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=180, stale-while-revalidate=60');
+---
+
+<AppLayout title="X" activeTab="x">
+  <div class="sticky top-0 z-40">
+    <AppHeader />
+  </div>
+
+  <main class="flex-1 overflow-y-auto">
+
+    <!-- Account strip -->
+    <div class="px-3 pt-3 pb-1">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-bold text-base-content/70 uppercase tracking-wider">X 帳號</span>
+      </div>
+      <div class="flex gap-2.5 overflow-x-auto pb-1 scrollbar-none">
+
+        <!-- 全部 -->
+        <button data-a-btn="all" class="flex flex-col items-center gap-1 shrink-0 opacity-100">
+          <div class="w-11 h-11 rounded-full bg-base-300 flex items-center justify-center text-base-content/60 font-bold text-sm ring-2 ring-primary ring-offset-1">
+            全
+          </div>
+          <span class="text-[13px] whitespace-nowrap text-primary font-bold">全部</span>
+        </button>
+
+        {authors.map((a) => (
+          <button data-a-btn={a.username} class="flex flex-col items-center gap-1 shrink-0 opacity-70">
+            {a.avatarUrl ? (
+              <img
+                src={a.avatarUrl}
+                alt=""
+                loading="eager"
+                class="w-11 h-11 rounded-full object-cover"
+              />
+            ) : (
+              <div class="w-11 h-11 rounded-full bg-base-300 flex items-center justify-center text-base-content/60 font-bold text-sm">
+                {a.name.charAt(0)}
+              </div>
+            )}
+            <span class="text-[13px] whitespace-nowrap max-w-13 truncate text-base-content/70">@{a.username}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+
+    <!-- Count bar -->
+    <div class="flex items-center px-3 pt-3 pb-2">
+      {!fetchError && <span id="tweet-count" class="text-sm text-base-content/50">{tweets.length} 條貼文</span>}
+    </div>
+
+    {fetchError ? (
+      <p class="px-4 py-6 text-sm text-error">{fetchError}</p>
+    ) : (
+      <>
+        <div id="tweet-list" class="px-3 flex flex-col gap-3 pb-2">
+          {tweets.map((tweet) => (
+            <a href={`/x/posts/${tweet.id}`} class="card bg-base-100 shadow-sm p-3.5 block" data-author={tweet.authorUsername}>
+
+              <!-- Author -->
+              <div class="flex items-center gap-2.5 mb-2.5">
+                {tweet.authorAvatarUrl ? (
+                  <img
+                    src={tweet.authorAvatarUrl}
+                    alt=""
+                    loading="lazy"
+                    class="w-9 h-9 rounded-full object-cover shrink-0"
+                  />
+                ) : (
+                  <div class="w-9 h-9 rounded-full bg-base-300 flex items-center justify-center text-base-content/60 font-bold text-sm shrink-0">
+                    {tweet.authorName.charAt(0)}
+                  </div>
+                )}
+                <div class="min-w-0">
+                  <p class="text-[15px] font-bold text-base-content leading-none">{tweet.authorName}</p>
+                  <p class="text-sm text-base-content/50 mt-0.5">@{tweet.authorUsername}</p>
+                </div>
+                {tweet.isRetweet && (
+                  <span class="ml-auto text-xs text-base-content/40 shrink-0">↺ RT</span>
+                )}
+              </div>
+
+              <!-- Text -->
+              <p class="text-[15px] leading-[1.6] text-base-content line-clamp-6" data-enc>{tweet.text}</p>
+
+              <!-- Quoted post -->
+              {tweet.quotedPost && (
+                <div class="mt-2.5 border border-base-300 rounded-xl p-3 bg-base-200/50">
+                  <p class="text-xs font-semibold text-base-content/60 mb-1">
+                    @{tweet.quotedPost.authorUsername}
+                  </p>
+                  <p class="text-[14px] leading-normal text-base-content/80 line-clamp-3" data-enc>{tweet.quotedPost.text}</p>
+                </div>
+              )}
+
+              <!-- Media thumbnail -->
+              {tweet.thumbUrl && (
+                <div class="mt-2.5 rounded-xl overflow-hidden bg-base-300 aspect-video relative" data-media-container data-video-src={tweet.videoSrc ?? undefined}>
+                  <img src={tweet.thumbUrl} alt="" loading="lazy" class="w-full h-full object-cover" />
+                  {tweet.fullImageUrl && (
+                    <button
+                      type="button"
+                      data-image-preview
+                      data-full-src={tweet.fullImageUrl}
+                      data-image-alt={`${tweet.authorName || 'X'} 的圖片`}
+                      aria-label="查看完整圖片"
+                      class="group absolute inset-0 flex w-full items-center justify-center cursor-zoom-in"
+                    >
+                      <span class="rounded-full bg-black/60 p-2 text-white opacity-70 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-visible:opacity-100">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+                          <circle cx="11" cy="11" r="7" />
+                          <path stroke-linecap="round" d="M16.5 16.5L21 21M11 8v6M8 11h6" />
+                        </svg>
+                      </span>
+                    </button>
+                  )}
+                  {tweet.hasVideo && (
+                    <button type="button" data-play-btn class="absolute inset-0 flex items-center justify-center w-full">
+                      <div class="w-12 h-12 rounded-full bg-black/50 flex items-center justify-center pointer-events-none">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" class="w-6 h-6 ml-0.5">
+                          <path d="M8 5v14l11-7z"/>
+                        </svg>
+                      </div>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <!-- Footer -->
+              <div class="flex items-center justify-between mt-2.5 pt-2 border-t border-base-300">
+                <span class="text-sm text-base-content/50" data-local-relative={tweet.dateValue}>{tweet.timeAgo}</span>
+                <div class="flex gap-3 text-sm text-base-content/50">
+                  <span>↩ {tweet.replyCount.toLocaleString()}</span>
+                  <span>↺ {tweet.retweetCount.toLocaleString()}</span>
+                  <span>♡ {tweet.likeCount.toLocaleString()}</span>
+                </div>
+              </div>
+
+            </a>
+          ))}
+        </div>
+
+        <div class="px-3 pb-4">
+          <button id="btn-more" class="w-full py-2.5 text-sm text-primary font-semibold border border-primary/30 rounded-xl hover:bg-primary/5 transition-colors">載入更多</button>
+        </div>
+      </>
+    )}
+
+  </main>
+</AppLayout>
+
+<script is:inline define:vars={{ PAGE }}>
+  const countEl = document.getElementById('tweet-count');
+  const list = document.getElementById('tweet-list');
+  const btnMore = document.getElementById('btn-more');
+
+  let activeAuthor = 'all';
+  let shown = PAGE;
+
+  function allCards() {
+    return list ? Array.from(list.querySelectorAll('[data-author]')) : [];
+  }
+
+  function applyFilter() {
+    let matched = 0;
+    allCards().forEach(card => {
+      const matches = activeAuthor === 'all' || card.dataset.author === activeAuthor;
+      card.style.display = matches && matched < shown ? '' : 'none';
+      if (matches) matched++;
+    });
+    if (btnMore) btnMore.style.display = matched > shown ? '' : 'none';
+    if (countEl) countEl.textContent = matched + ' 條貼文';
+  }
+
+  function activateAuthor(username) {
+    activeAuthor = username;
+    shown = PAGE;
+    document.querySelectorAll('[data-a-btn]').forEach(b => {
+      const isActive = b.dataset.aBtn === username;
+      b.classList.toggle('opacity-100', isActive);
+      b.classList.toggle('opacity-70', !isActive);
+      const img = b.querySelector('img');
+      const div = b.querySelector('div');
+      const span = b.querySelector('span');
+      img?.classList.toggle('ring-2', isActive);
+      img?.classList.toggle('ring-primary', isActive);
+      img?.classList.toggle('ring-offset-1', isActive);
+      div?.classList.toggle('ring-2', isActive);
+      div?.classList.toggle('ring-primary', isActive);
+      div?.classList.toggle('ring-offset-1', isActive);
+      if (span) {
+        span.classList.toggle('text-primary', isActive);
+        span.classList.toggle('font-bold', isActive);
+        span.classList.toggle('text-base-content/70', !isActive);
+      }
+    });
+    applyFilter();
+  }
+
+  document.querySelectorAll('[data-play-btn]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const container = btn.closest('[data-media-container]');
+      const videoSrc = container?.dataset.videoSrc;
+
+      if (!videoSrc) {
+        // No proxied URL — fall through to detail page
+        const link = btn.closest('a[href]');
+        if (link) window.location.href = link.getAttribute('href');
+        return;
+      }
+
+      const video = document.createElement('video');
+      video.src = videoSrc;
+      video.controls = true;
+      video.autoplay = true;
+      video.playsinline = true;
+      video.style.cssText = 'width:100%;height:100%;object-fit:contain;background:#000';
+      if (container) {
+        container.innerHTML = '';
+        container.appendChild(video);
+      }
+      video.play().catch(() => {});
+    });
+  });
+
+  document.querySelectorAll('[data-a-btn]').forEach(btn => {
+    btn.addEventListener('click', () => activateAuthor(btn.dataset.aBtn));
+  });
+
+  if (btnMore) {
+    btnMore.addEventListener('click', () => {
+      shown += PAGE;
+      applyFilter();
+    });
+  }
+
+  applyFilter();
+</script>
+
+<style>
+  .scrollbar-none { scrollbar-width: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+</style>

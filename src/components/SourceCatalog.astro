@@ -1,0 +1,39 @@
+---
+/**
+ * Grouped list directory for non-GJW source/list discovery.
+ */
+import type { SourceCatalogEntry } from "@/data/source-catalog";
+import { buildOriginListHref } from "@/lib/proxy-utils";
+
+interface Props {
+	sources: SourceCatalogEntry[];
+}
+
+const { sources } = Astro.props;
+---
+
+<div class="grid gap-6 xl:grid-cols-2">
+	{sources.map((source) => (
+		<section class="rounded-[1.75rem] border border-stone-200 bg-white/95 p-6 shadow-[0_20px_60px_rgba(41,37,36,0.08)]">
+			<div class="mb-5 space-y-2">
+				<div class="flex items-center justify-between gap-3">
+					<h3 class="font-display text-2xl font-semibold text-stone-900">{source.name}</h3>
+					<span class="rounded-full border border-stone-300 px-3 py-1 text-xs uppercase tracking-[0.22em] text-stone-600">
+						{source.continuationParam}
+					</span>
+				</div>
+				<p class="text-sm leading-6 text-stone-600">{source.description}</p>
+			</div>
+			<div class="flex flex-wrap gap-2">
+				{source.lists.map((listName) => (
+					<a
+						href={buildOriginListHref(source.id, listName)}
+						class="rounded-full border border-stone-300 bg-stone-50 px-3 py-2 text-sm text-stone-700 transition hover:border-amber-600 hover:bg-amber-50 hover:text-stone-950"
+					>
+						{listName}
+					</a>
+				))}
+			</div>
+		</section>
+	))}
+</div>

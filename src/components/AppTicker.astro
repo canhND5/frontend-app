@@ -1,0 +1,37 @@
+---
+interface Props {
+  items?: string[];
+}
+
+const {
+  items = [
+    '習近平召開緊急政治局會議',
+    '台海解放軍異常集結',
+    '美國通過新對華制裁',
+    '多省工人維權示威',
+  ],
+} = Astro.props;
+
+const text = items.join(' · ');
+---
+
+<div class="bg-primary flex items-center gap-2 px-3 py-1.5 overflow-hidden shrink-0">
+  <span class="text-[13px] font-bold whitespace-nowrap shrink-0 flex items-center gap-1">
+    <span class="w-1.5 h-1.5 rounded-full bg-error inline-block"></span>
+    <span class="text-[14px] text-white/70">快訊</span>
+  </span>
+  <div class="overflow-hidden flex-1">
+    <p class="text-white/88 text-[14px] whitespace-nowrap ticker-scroll">{text}</p>
+  </div>
+</div>
+
+<style>
+  .ticker-scroll {
+    animation: tick 26s linear infinite;
+    display: inline-block;
+  }
+  @keyframes tick {
+    from { transform: translateX(100%); }
+    to   { transform: translateX(-100%); }
+  }
+</style>

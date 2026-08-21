@@ -1,0 +1,175 @@
+---
+import '../styles/global.css';
+import BottomNav from '../components/BottomNav.astro';
+
+interface Props {
+  title?: string;
+  activeTab?: 'home' | 'videos' | 'articles' | 'x' | 'book';
+  ogTitle?: string;
+  ogDescription?: string;
+}
+
+const { title = '', activeTab = 'home', ogTitle, ogDescription } = Astro.props;
+
+const navItems = [
+  {
+    key: 'home',     href: '/',         label: '首頁',
+    d: 'M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25',
+  },
+  {
+    key: 'videos',   href: '/videos',   label: '視頻',
+    d: 'M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z',
+  },
+  {
+    key: 'articles', href: '/articles', label: '文章',
+    d: 'M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z',
+  },
+  {
+    key: 'x',        href: '/x',        label: 'X',
+    d: 'M6 18L18 6M6 6l12 12',
+  },
+  {
+    key: 'book',     href: '/books',    label: '書籍',
+    d: 'M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25',
+  },
+] satisfies { key: Props['activeTab']; href: string; label: string; d: string }[];
+---
+
+<!doctype html>
+<html lang="zh-TW" data-theme="visioncn">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{ogTitle ?? title}</title>
+    {ogTitle && <meta property="og:title" content={ogTitle} />}
+    {ogDescription && <meta property="og:description" content={ogDescription} />}
+    {ogTitle && <meta property="og:type" content="article" />}
+    <!-- Google tag (gtag.js) -->
+    <script is:inline async src="https://www.googletagmanager.com/gtag/js?id=G-9V9051J3T3"></script>
+    <script is:inline>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-9V9051J3T3');
+    </script>
+  </head>
+  <script is:inline src="/enc.js" defer></script>
+  <body class="bg-base-200 min-h-screen">
+    <div class="flex min-h-screen lg:justify-center">
+
+      <!-- Desktop left sidebar -->
+      <aside class="hidden lg:flex lg:flex-col lg:w-60 lg:shrink-0 lg:sticky lg:top-0 lg:h-screen lg:bg-base-100 lg:border-r lg:border-base-300">
+        <div class="px-5 py-5 border-b border-base-300">
+          <span class="font-extrabold text-xl text-base-content"></span>
+        </div>
+        <ul class="menu menu-md px-2 py-3 gap-0.5 flex-1">
+          {navItems.map((item) => (
+            <li>
+              <a
+                href={item.href}
+                class:list={[activeTab === item.key ? 'active' : '']}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d={item.d} />
+                </svg>
+                {item.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+        <div class="px-5 py-4 border-t border-base-300">
+          <p class="text-[11px] text-base-content/40 leading-relaxed">
+            © 2025<br />保留所有權利
+          </p>
+        </div>
+      </aside>
+
+      <!-- Main column -->
+      <div class="w-full max-w-120 mx-auto flex flex-col min-h-screen bg-base-200 lg:max-w-200 lg:mx-0 lg:border-r lg:border-base-300">
+        <div class="flex flex-col flex-1 pb-16 lg:pb-0">
+          <slot />
+        </div>
+        <BottomNav active={activeTab} />
+      </div>
+
+    </div>
+
+    <dialog id="image-lightbox" aria-label="圖片預覽" class="m-auto h-screen max-h-none w-screen max-w-none bg-transparent p-4 backdrop:bg-black/80">
+      <div class="relative flex h-full w-full items-center justify-center">
+        <img data-lightbox-image alt="" class="max-h-full max-w-full object-contain" />
+        <button type="button" data-lightbox-close aria-label="關閉圖片預覽" class="absolute right-0 top-0 rounded-full bg-black/60 p-2 text-white hover:bg-black/80">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-6 w-6">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
+    </dialog>
+
+    <script is:inline>
+      const imageLightboxDialog = document.getElementById('image-lightbox');
+      const imageLightboxImage = imageLightboxDialog?.querySelector('[data-lightbox-image]');
+      const imageLightboxClose = imageLightboxDialog?.querySelector('[data-lightbox-close]');
+
+      const closeImageLightbox = () => {
+        if (imageLightboxDialog?.open) imageLightboxDialog.close();
+      };
+
+      document.querySelectorAll('[data-image-preview]').forEach((trigger) => {
+        trigger.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+
+          const src = trigger.getAttribute('data-full-src');
+          if (!src || !imageLightboxDialog || !imageLightboxImage) return;
+
+          imageLightboxImage.setAttribute('src', src);
+          imageLightboxImage.setAttribute('alt', trigger.getAttribute('data-image-alt') || '圖片預覽');
+          if (!imageLightboxDialog.open) imageLightboxDialog.showModal();
+        });
+      });
+
+      imageLightboxClose?.addEventListener('click', closeImageLightbox);
+      imageLightboxDialog?.addEventListener('click', (event) => {
+        if (event.target === imageLightboxDialog) closeImageLightbox();
+      });
+      imageLightboxDialog?.addEventListener('close', () => imageLightboxImage?.removeAttribute('src'));
+    </script>
+
+    <script is:inline>
+      const formatMonthDay = (date) => {
+        const year = date.getFullYear() !== new Date().getFullYear() ? `${date.getFullYear()}年` : '';
+        return `${year}${date.getMonth() + 1}月${date.getDate()}日`;
+      };
+      const parseDate = (value) => {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date(`${value}T00:00:00Z`);
+        if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(value)) return new Date(`${value}Z`);
+        return new Date(value);
+      };
+      const formatRelativeTime = (value) => {
+        const date = parseDate(value);
+        if (Number.isNaN(date.getTime())) return '';
+        const diffMin = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
+        if (diffMin < 1) return '剛剛';
+        if (diffMin < 60) return `${diffMin} 分鐘前`;
+        const diffH = Math.floor(diffMin / 60);
+        if (diffH < 24) return `${diffH} 小時前`;
+        return formatMonthDay(date);
+      };
+
+      document.querySelectorAll('[data-local-relative], [data-local-date], [data-local-month-day]').forEach((element) => {
+        const value = element.getAttribute('data-local-relative') ?? element.getAttribute('data-local-date') ?? element.getAttribute('data-local-month-day');
+        if (!value) return;
+
+        const date = parseDate(value);
+        if (Number.isNaN(date.getTime())) return;
+
+        element.textContent = element.hasAttribute('data-local-relative')
+          ? formatRelativeTime(value)
+          : formatMonthDay(date);
+      });
+    </script>
+
+  </body>
+</html>

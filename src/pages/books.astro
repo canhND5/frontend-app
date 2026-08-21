@@ -1,0 +1,76 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import AppHeader from '@/components/AppHeader.astro';
+import { encryptText } from '@/lib/aes';
+
+const aesKey = process.env.AES_SECRET_KEY ?? '';
+
+type Volume = { label: string; pdf: string; epub: string };
+type Book = {
+  title: string;      // AES-encrypted (data-enc), like article titles
+  subtitle: string;   // AES-encrypted
+  cover: string;
+  href: string;
+  volumes: Volume[];
+};
+
+// 書籍清單。封面走 /book/ 反向代理；下載走 /downloads/*（R2，中性檔名）。
+// 標題以 AES 加密，避免在 /books 頁洩漏書名（與全站 GFW 混淆一致）。
+const books: Book[] = [
+  {
+    title: await encryptText('裸體的共產黨', aesKey),
+    subtitle: await encryptText('增補版', aesKey),
+    cover: '/book/assets/images/upper-01.jpg',
+    href: '/book/',
+    volumes: [
+      { label: 'Vol.1', pdf: '/downloads/vol-1.pdf', epub: '/downloads/vol-1.epub' },
+      { label: 'Vol.2', pdf: '/downloads/vol-2.pdf', epub: '/downloads/vol-2.epub' },
+    ],
+  },
+];
+
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, s-maxage=3600, stale-while-revalidate=300');
+---
+
+<AppLayout title="書籍" activeTab="book">
+  <div class="sticky top-0 z-40">
+    <AppHeader />
+  </div>
+
+  <main class="flex-1 overflow-y-auto">
+    <div class="px-3 pt-4 pb-2">
+      <h1 class="text-xl font-extrabold text-base-content">書籍</h1>
+      <p class="text-sm text-base-content/50 mt-0.5">點擊封面線上閱讀，或下載 PDF / EPUB</p>
+    </div>
+
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 px-3 py-2 pb-6">
+      {books.map((book) => (
+        <div class="card bg-base-100 shadow-sm overflow-hidden flex flex-col">
+          <a href={book.href} class="block group relative aspect-3/4 bg-base-300 overflow-hidden">
+            <img
+              src={book.cover}
+              alt=""
+              loading="lazy"
+              class="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          </a>
+          <div class="px-3 py-2.5 flex flex-col gap-2">
+            <div>
+              <p class="text-[15px] font-bold text-base-content leading-snug line-clamp-2" data-enc>{book.title}</p>
+              <p class="text-[13px] text-base-content/50 mt-0.5" data-enc>{book.subtitle}</p>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              {book.volumes.map((v) => (
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[12px] font-semibold text-base-content/45 w-9 shrink-0">{v.label}</span>
+                  <a href={v.pdf} download class="flex-1 text-center text-[12px] font-semibold text-primary border border-primary/30 rounded-md py-1 hover:bg-primary/5 transition-colors">PDF</a>
+                  <a href={v.epub} download class="flex-1 text-center text-[12px] font-semibold text-primary border border-primary/30 rounded-md py-1 hover:bg-primary/5 transition-colors">EPUB</a>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </main>
+</AppLayout>

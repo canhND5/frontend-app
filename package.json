@@ -1,0 +1,44 @@
+{
+  "name": "astro-app",
+  "type": "module",
+  "version": "0.0.2",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro build && astro preview",
+    "deploy": "npm run build && wrangler secret bulk .dev.vars && wrangler deploy",
+    "seed:local": "wrangler r2 object get pg-cms-manifest/channels.json --remote --file /tmp/channels_seed.json && wrangler r2 object put pg-cms-manifest/channels.json --file /tmp/channels_seed.json --local --persist-to .wrangler/state && rm /tmp/channels_seed.json && wrangler r2 object put pg-cms-manifest/editorial/slugs.json --file scripts/editorial-slugs.json --local --persist-to .wrangler/state",
+    "gen-editorial": "bun run scripts/gen-editorial-slugs.ts",
+    "typecheck": "astro check",
+    "lint": "eslint .",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "^13.5.2",
+    "@fingerprintjs/fingerprintjs": "^5.2.0",
+    "@tailwindcss/vite": "^4.3.0",
+    "astro": "^6.3.5",
+    "daisyui": "^5.5.20",
+    "hls.js": "^1.6.16",
+    "tailwindcss": "^4.3.0",
+    "wrangler": "^4.92.0"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.54.0",
+    "@astrojs/check": "^0.9.9",
+    "@eslint/js": "^10.0.1",
+    "@types/bun": "^1.3.14",
+    "@types/hls.js": "^0.13.3",
+    "eslint": "^10.4.0",
+    "eslint-plugin-astro": "^1.7.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.59.4"
+  },
+  "overrides": {
+    "@cloudflare/vite-plugin": "1.27.0",
+    "vite": "^7"
+  }
+}

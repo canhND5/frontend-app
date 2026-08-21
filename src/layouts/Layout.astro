@@ -1,0 +1,42 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+}
+
+const { title = 'Astro App' } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+  </head>
+  <body class="min-h-screen bg-gray-50 text-gray-900">
+    <slot />
+  </body>
+</html>
+
+<script>
+  import FingerprintJS from '@fingerprintjs/fingerprintjs';
+
+  const STORAGE_KEY = 'uid';
+
+  async function getOrCreateUserId(): Promise<string> {
+    const existing = localStorage.getItem(STORAGE_KEY);
+    if (existing) return existing;
+
+    const fp = await FingerprintJS.load();
+    const { visitorId } = await fp.get();
+    localStorage.setItem(STORAGE_KEY, visitorId);
+    return visitorId;
+  }
+
+  const uid = await getOrCreateUserId();
+  console.log('[fp] uid:', uid);
+</script>

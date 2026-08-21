@@ -1,0 +1,57 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import AppHeader from '@/components/AppHeader.astro';
+import { fetchChannels } from '@/lib/channels';
+import { env } from 'cloudflare:workers';
+
+const channels = await fetchChannels((env as Partial<Env>).CMS_MANIFEST);
+
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, s-maxage=3600, stale-while-revalidate=300');
+---
+
+<AppLayout title="全部頻道" activeTab="videos">
+  <div class="sticky top-0 z-40 shrink-0">
+    <AppHeader showBack backHref="/videos" />
+    <div class="breadcrumbs text-sm bg-base-100 px-4 py-2 border-b border-base-300">
+      <ul>
+        <li><a href="/">首頁</a></li>
+        <li><a href="/videos">視頻</a></li>
+        <li>全部頻道</li>
+      </ul>
+    </div>
+  </div>
+
+  <main class="flex-1 overflow-y-auto pb-8">
+    <div class="px-3 pt-4">
+      <div class="flex items-center justify-between mb-4">
+        <h1 class="text-sm font-bold text-base-content/70 uppercase tracking-wider">全部頻道</h1>
+        <span class="text-xs text-base-content/50">共 {channels.length} 個頻道</span>
+      </div>
+
+      <div class="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-x-3 gap-y-5">
+        {channels.map((ch) => (
+          <a
+            href={`/channel/${encodeURIComponent(ch.id)}`}
+            class="flex flex-col items-center gap-2 group"
+          >
+            {ch.avatarUrl ? (
+              <img
+                src={ch.avatarUrl}
+                alt={ch.name}
+                loading="lazy"
+                class="w-16 h-16 rounded-full object-cover ring-1 ring-base-300 group-hover:ring-primary transition-all"
+              />
+            ) : (
+              <div class="w-16 h-16 rounded-full bg-base-300 flex items-center justify-center text-base-content/60 font-bold text-xl ring-1 ring-base-300 group-hover:ring-primary transition-all">
+                {ch.name.charAt(0)}
+              </div>
+            )}
+            <span class="text-[13px] text-base-content/80 text-center leading-tight line-clamp-2 group-hover:text-primary transition-colors">
+              {ch.name}
+            </span>
+          </a>
+        ))}
+      </div>
+    </div>
+  </main>
+</AppLayout>

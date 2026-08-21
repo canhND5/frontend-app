@@ -1,0 +1,125 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import AppHeader from '@/components/AppHeader.astro';
+import { fetchGjwChannelVideos } from '@/lib/proxy-api';
+import { fetchChannels } from '@/lib/channels';
+import { encryptText } from '@/lib/aes';
+import { proxyImageUrl } from '@/lib/img-proxy';
+import { timeAgo } from '@/lib/format';
+import { formatDurationLabel } from '@/lib/proxy-utils';
+import { env } from 'cloudflare:workers';
+
+const { id } = Astro.params;
+const channelId = id ?? '';
+const startKey = Astro.url.searchParams.get('startKey');
+const token = process.env.API_AUTH_TOKEN ?? '';
+const aesKey = process.env.AES_SECRET_KEY ?? '';
+
+const channels = await fetchChannels((env as Partial<Env>).CMS_MANIFEST);
+const channel = channels.find(ch => ch.id === channelId) ?? null;
+
+type VideoCard = {
+  title: string;
+  imageUrl: string | null;
+  timeAgo: string;
+  dateValue: string | null | undefined;
+  duration: string;
+  href: string;
+};
+
+let items: VideoCard[] = [];
+let nextCursor: string | null = null;
+let error: string | null = null;
+
+try {
+  const { data } = await fetchGjwChannelVideos(token, channelId, { pageSize: 20, startKey });
+  nextCursor = data.nextStartKey ?? data.nextCursor ?? null;
+  items = await Promise.all(
+    data.items.map(async (item) => ({
+      title: await encryptText(item.title, aesKey),
+      imageUrl: proxyImageUrl(item.imageUrl, 'gjw'),
+      timeAgo: timeAgo(item.publishedAt ?? item.pubDate),
+      dateValue: item.publishedAt ?? item.pubDate,
+      duration: formatDurationLabel(item.duration),
+      href: `/content/gjw/${item.sourceItemId}?kind=video`,
+    }))
+  );
+} catch (e) {
+  error = e instanceof Error ? e.message : String(e);
+}
+
+function nextUrl() {
+  return `/channel/${encodeURIComponent(channelId)}?startKey=${encodeURIComponent(nextCursor ?? '')}`;
+}
+
+Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=60');
+---
+
+<AppLayout title="頻道視頻" activeTab="videos">
+  <div class="sticky top-0 z-40 shrink-0">
+    <AppHeader showBack backHref="/channels" />
+  </div>
+
+  <main class="flex-1 overflow-y-auto">
+
+    <!-- Channel header -->
+    <div class="flex items-center gap-3 px-4 py-4 border-b border-base-300">
+      {channel?.avatarUrl ? (
+        <img src={channel.avatarUrl} alt="" loading="eager" class="w-14 h-14 rounded-full object-cover shrink-0" />
+      ) : (
+        <div class="w-14 h-14 rounded-full bg-base-300 flex items-center justify-center text-base-content/40 font-bold text-xl shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
+            <path d="M4.5 4.5a3 3 0 00-3 3v9a3 3 0 003 3h8.25a3 3 0 003-3v-9a3 3 0 00-3-3H4.5zM19.94 18.75l-2.69-2.69V7.94l2.69-2.69c.944-.945 2.56-.276 2.56 1.06v11.38c0 1.336-1.616 2.005-2.56 1.06z" />
+          </svg>
+        </div>
+      )}
+      <div class="min-w-0">
+        {channel?.name && <p class="font-bold text-base-content truncate">{channel.name}</p>}
+        <p class="text-xs text-base-content/50 mt-0.5">{items.length > 0 || !error ? `${items.length}${nextCursor ? '+' : ''} 支視頻` : ''}</p>
+      </div>
+    </div>
+
+    {error ? (
+      <p class="px-4 py-6 text-sm text-error">{error}</p>
+    ) : items.length === 0 ? (
+      <p class="px-4 py-10 text-sm text-center text-base-content/40">暫無視頻</p>
+    ) : (
+      <>
+        <div class="px-3 flex flex-col gap-3 pt-3 pb-2">
+          {items.map((v) => (
+            <a href={v.href} class="card bg-base-100 shadow-sm overflow-hidden block">
+              <div class="relative aspect-video bg-linear-to-br from-[#1a1a2e] to-[#16213e] flex items-center justify-center overflow-hidden">
+                {v.imageUrl && (
+                  <img src={v.imageUrl} alt="" loading="lazy" class="absolute inset-0 w-full h-full object-cover" />
+                )}
+                <span class="relative z-10 w-10 h-10 bg-white/90 rounded-full flex items-center justify-center text-primary shadow">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 translate-x-0.5">
+                    <path fill-rule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clip-rule="evenodd" />
+                  </svg>
+                </span>
+                {v.duration !== 'Live' && (
+                  <span class="absolute bottom-2 right-2 bg-black/65 text-white text-[13px] px-1.5 py-px rounded-sm z-10">{v.duration}</span>
+                )}
+              </div>
+              <div class="px-3 py-2.5">
+                <p class="text-[18px] lg:text-[20px] font-bold text-base-content leading-[1.4] line-clamp-2" data-enc>{v.title}</p>
+                <div class="flex items-center justify-end mt-1.5">
+                  <span class="text-sm text-base-content/50" data-local-relative={v.dateValue}>{v.timeAgo}</span>
+                </div>
+              </div>
+            </a>
+          ))}
+        </div>
+
+        {nextCursor && (
+          <div class="px-4 pb-6">
+            <a href={nextUrl()} class="block w-full py-2.5 text-sm text-center text-primary font-semibold border border-primary/30 rounded-xl hover:bg-primary/5 transition-colors">
+              下一頁
+            </a>
+          </div>
+        )}
+      </>
+    )}
+
+  </main>
+</AppLayout>

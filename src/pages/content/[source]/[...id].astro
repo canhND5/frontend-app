@@ -1,0 +1,281 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import AppHeader from '@/components/AppHeader.astro';
+import { fetchContentDetail } from '@/lib/proxy-api';
+import { encryptText } from '@/lib/aes';
+import { proxyImageUrl } from '@/lib/img-proxy';
+import { sourceDisplayName, timeAgo } from '@/lib/format';
+import { encodeMediaResourceId } from '@/lib/media-resource';
+
+const { source, id } = Astro.params;
+const itemId = Array.isArray(id) ? id.join('/') : (id ?? '');
+const token = process.env.API_AUTH_TOKEN ?? '';
+const aesKey = process.env.AES_SECRET_KEY ?? '';
+const kindParam = Astro.url.searchParams.get('kind');
+let collection: 'articles' | 'videos' = kindParam === 'video' ? 'videos' : 'articles';
+
+let detail = null;
+let error: string | null = null;
+let encTitle = '';
+let encBody = '';
+
+async function loadDetail(col: 'articles' | 'videos') {
+  const { data } = await fetchContentDetail(token, source ?? '', itemId, col);
+  return data;
+}
+
+try {
+  detail = await loadDetail(collection);
+
+  // GJW IDs can be either articles or videos; if the initial collection fails,
+  // try the other one automatically.
+  if (!detail && source === 'gjw') {
+    const fallback = collection === 'articles' ? 'videos' : 'articles';
+    detail = await loadDetail(fallback);
+    collection = fallback;
+  }
+} catch (e) {
+  if (source === 'gjw' && collection === 'articles') {
+    try {
+      detail = await loadDetail('videos');
+      collection = 'videos';
+    } catch {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  } else {
+    error = e instanceof Error ? e.message : String(e);
+  }
+}
+
+if (detail) {
+  if (detail.title) encTitle = await encryptText(detail.title, aesKey);
+  if (detail.bodyHtml) {
+    const resourceMap = Object.fromEntries(
+      (detail.resources ?? [])
+        .filter(r => r.key && (r.url || r.originalUrl))
+        .map(r => [r.key!, (r.url ?? r.originalUrl)!])
+    );
+    const resolvedHtml = detail.bodyHtml.replace(
+      /data-pocket-resource="([^"]+)"/g,
+      (_, key) => {
+        const imgUrl = resourceMap[key];
+        if (!imgUrl) return '';
+        return `src="${proxyImageUrl(imgUrl, source) ?? imgUrl}"`;
+      }
+    );
+    encBody = await encryptText(resolvedHtml, aesKey);
+  }
+}
+
+Astro.response.headers.set('Cache-Control', 'public, max-age=120, s-maxage=600, stale-while-revalidate=120');
+
+const sourceName = sourceDisplayName(source ?? '');
+const isVideo = detail?.contentType === 'video';
+const publishTime = timeAgo(detail?.publishedAt);
+const category = detail?.tags?.[0]?.name ?? null;
+const videoResourceId = isVideo && detail?.posterVideoUrl
+  ? encodeMediaResourceId({ collection: 'videos', sourceItemId: source ?? '', url: detail.posterVideoUrl })
+  : null;
+const posterSrc = detail?.posterImageUrl
+  ? proxyImageUrl(detail.posterImageUrl, source) ?? detail.posterImageUrl
+  : undefined;
+---
+
+<AppLayout title={detail?.title ?? '詳情'} activeTab="articles">
+  <div class="sticky top-0 z-40 shrink-0">
+    <AppHeader showBack backHref={isVideo ? '/videos' : '/articles'} />
+    <div class="breadcrumbs text-sm bg-base-100 px-4 py-2 border-b border-base-300">
+      <ul>
+        <li><a href="/">首頁</a></li>
+        <li><a href={isVideo ? '/videos' : '/articles'}>{isVideo ? '視頻' : '文章'}</a></li>
+        <li>{sourceName}</li>
+      </ul>
+    </div>
+  </div>
+
+  <main class="flex-1 overflow-y-auto pb-6">
+
+    {error ? (
+      <div class="px-4 py-12 flex flex-col items-center text-center gap-3">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-10 h-10 text-base-content/40">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+        </svg>
+        <p class="text-[16px] font-bold text-base-content">內容暫時無法載入</p>
+        <p class="text-sm text-base-content/50">請稍後再試</p>
+        <a href="/" class="mt-2 text-sm text-primary font-semibold">← 返回首頁</a>
+      </div>
+    ) : (
+      <>
+        <!-- Video player: top (YouTube style) -->
+        {videoResourceId && (
+          <div class="aspect-video bg-black relative">
+            <video
+              id="video-player"
+              class="w-full h-full"
+              controls
+              playsinline
+              poster={posterSrc}
+              data-rid={videoResourceId}
+            />
+          </div>
+        )}
+
+        <!-- Content -->
+        <div class="bg-base-100 px-4 pt-5 pb-12">
+
+          <!-- Category badge -->
+          {category && (
+            <span class="inline-block text-xs bg-primary/10 text-primary font-semibold px-2.5 py-1 rounded-full mb-3">
+              {category}
+            </span>
+          )}
+
+          <!-- Title -->
+          <h1 class="text-[32px] font-extrabold text-base-content leading-tight mb-3" data-enc>
+            {encTitle}
+          </h1>
+
+          <!-- Meta: source · date -->
+          <div class="flex items-center gap-2 text-sm pb-4 mb-5 border-b border-base-300">
+            <span class="font-semibold text-base-content/70">{sourceName}</span>
+            <span class="text-base-content/30">·</span>
+            <span class="text-base-content/50" data-local-relative={detail?.publishedAt}>{publishTime}</span>
+          </div>
+
+          <!-- Hero image: articles only, full-bleed -->
+          {!videoResourceId && posterSrc && (
+            <div class="-mx-4 mb-6">
+              <img src={posterSrc} alt="" loading="eager" class="w-full aspect-video object-cover" />
+            </div>
+          )}
+
+          <!-- Body -->
+          {detail?.bodyHtml ? (
+            <div class="article-body text-[17px] text-base-content leading-[1.8]" data-enc-html={encBody} />
+          ) : detail?.summary ? (
+            <p class="text-[16px] text-base-content/70 leading-[1.8] whitespace-pre-line">{detail.summary}</p>
+          ) : null}
+
+        </div>
+      </>
+    )}
+
+  </main>
+</AppLayout>
+
+<script>
+const video = document.getElementById('video-player') as HTMLVideoElement | null;
+if (video) {
+  const rid = video.dataset.rid!;
+
+  const [{ default: Hls }, { default: FingerprintJS }] = await Promise.all([
+    import('hls.js'),
+    import('@fingerprintjs/fingerprintjs'),
+  ]);
+
+  const fp = await FingerprintJS.load();
+  const { visitorId } = await fp.get();
+
+  const manifestUrl = `/api/video-manifest?rid=${encodeURIComponent(rid)}&fp=${encodeURIComponent(visitorId)}`;
+
+  if (Hls.isSupported()) {
+    const hls = new Hls({ enableWorker: false });
+    hls.on(Hls.Events.ERROR, (_evt, data) => {
+      if (data.fatal) {
+        console.error('[hls] fatal error', data.type, data.details, data);
+        const wrapper = video.parentElement;
+        if (wrapper) {
+          wrapper.insertAdjacentHTML('beforeend',
+            `<p style="position:absolute;bottom:8px;left:8px;right:8px;color:#fff;font-size:12px;text-align:center;opacity:.8">視頻載入失敗 (${data.details})</p>`
+          );
+        }
+      }
+    });
+    hls.loadSource(manifestUrl);
+    hls.attachMedia(video);
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = manifestUrl;
+  } else {
+    console.warn('[video] HLS not supported in this browser');
+  }
+}
+</script>
+
+<style is:global>
+  .article-body { line-height: 1.85; }
+
+  .article-body p {
+    margin-bottom: 1.25rem !important;
+    color: var(--color-base-content);
+  }
+
+  /* 含圖片的段落：上下留白、水平置中 */
+  .article-body p:has(img) {
+    text-align: center;
+    margin: 1.5rem 0;
+  }
+
+  /* 圖片緊跟的文字視為圖說 */
+  .article-body p:has(img) br + * ,
+  .article-body p:has(img) {
+    font-size: 0.8125rem;
+    color: color-mix(in oklch, var(--color-base-content) 50%, transparent);
+    line-height: 1.5;
+  }
+
+  .article-body img {
+    max-width: 100% !important;
+    width: 100% !important;
+    height: auto !important;
+    border-radius: 0.5rem;
+    display: block;
+    margin: 0 auto 0.5rem;
+  }
+
+  .article-body figure {
+    margin: 1.5rem 0;
+  }
+  .article-body figcaption {
+    font-size: 0.8125rem;
+    color: color-mix(in oklch, var(--color-base-content) 50%, transparent);
+    text-align: center;
+    margin-top: 0.375rem;
+    line-height: 1.5;
+  }
+
+  .article-body h2, .article-body h3 {
+    font-weight: 800;
+    color: var(--color-primary);
+    margin: 2rem 0 0.625rem;
+    line-height: 1.4;
+  }
+  .article-body h2 { font-size: 1.0625rem; }
+  .article-body h3 { font-size: 1rem; }
+
+  .article-body ul, .article-body ol {
+    padding-left: 1.5rem;
+    margin-bottom: 1.25rem;
+  }
+  .article-body li { margin-bottom: 0.375rem; }
+
+  .article-body blockquote {
+    border-left: 3px solid var(--color-primary);
+    padding-left: 1rem;
+    margin: 1.5rem 0;
+    color: color-mix(in oklch, var(--color-base-content) 70%, transparent);
+    font-style: italic;
+  }
+
+  .article-body a {
+    color: var(--color-primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  /* 分隔線 */
+  .article-body hr {
+    border: none;
+    border-top: 1px solid var(--color-base-300);
+    margin: 1.75rem 0;
+  }
+</style>

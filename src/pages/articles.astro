@@ -1,0 +1,130 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import AppHeader from '@/components/AppHeader.astro';
+import { fetchOstayNtdAndKzgPicks, fetchOstayRecent } from '@/lib/ostay-api';
+import { encryptText } from '@/lib/aes';
+import { sourceDisplayName, timeAgo } from '@/lib/format';
+import { proxyImageUrl } from '@/lib/img-proxy';
+
+const PAGE_SIZE = 20;
+const aesKey = process.env.AES_SECRET_KEY ?? '';
+
+const tab = Astro.url.searchParams.get('tab') === 'new' ? 'new' : 'hot';
+const page = Math.max(1, Number(Astro.url.searchParams.get('page') ?? '1'));
+
+type ArticleCard = {
+  title: string;
+  imageUrl: string | null;
+  sourceName: string;
+  timeAgo: string;
+  dateValue: string | null | undefined;
+  href: string;
+};
+
+async function toCard(item: { title: string; imageUrl?: string | null; source: string; sourceItemId: string; publishedAt?: string | null; createdAt?: string; pubDate?: string | null }): Promise<ArticleCard> {
+  return {
+    title: await encryptText(item.title, aesKey),
+    imageUrl: proxyImageUrl(item.imageUrl, item.source),
+    sourceName: sourceDisplayName(item.source),
+    timeAgo: timeAgo(item.publishedAt ?? item.pubDate ?? item.createdAt),
+    dateValue: item.publishedAt ?? item.pubDate ?? item.createdAt,
+    href: `/content/${item.source}/${item.sourceItemId}`,
+  };
+}
+
+let items: ArticleCard[] = [];
+let totalPages = 1;
+let totalCount = 0;
+let fetchError: string | null = null;
+
+try {
+  if (tab === 'hot') {
+    const { data } = await fetchOstayNtdAndKzgPicks(page);
+    items = await Promise.all(data.items.map(toCard));
+    totalPages = Math.ceil(data.total / data.pageSize);
+    totalCount = data.total;
+  } else {
+    const { data } = await fetchOstayRecent(24, 'article');
+    const allItems = await Promise.all(data.items.map(toCard));
+    totalCount = allItems.length;
+    totalPages = Math.ceil(allItems.length / PAGE_SIZE);
+    const safePage = Math.min(page, totalPages || 1);
+    items = allItems.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  }
+} catch (e) {
+  fetchError = e instanceof Error ? e.message : String(e);
+}
+
+const safePage = Math.min(page, totalPages || 1);
+
+function pageUrl(p: number) {
+  return `/articles?tab=${tab}&page=${p}`;
+}
+function tabUrl(t: string) {
+  return `/articles?tab=${t}&page=1`;
+}
+
+Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=60');
+---
+
+<AppLayout title="文章" activeTab="articles">
+  <div class="sticky top-0 z-40">
+    <AppHeader />
+  </div>
+
+  <main class="flex-1 overflow-y-auto">
+
+    <!-- Sort bar -->
+    <div class="flex items-center justify-between px-3 pt-4 pb-2">
+      {!fetchError && (
+        <span class="text-sm text-base-content/50">
+          {totalCount} 篇文章
+        </span>
+      )}
+      {fetchError && <span />}
+      <div role="tablist" class="tabs tabs-boxed bg-base-200">
+        <a href={tabUrl('hot')} role="tab" class:list={['tab tab-sm', tab === 'hot' ? 'tab-active' : '']}>最熱</a>
+        <a href={tabUrl('new')} role="tab" class:list={['tab tab-sm', tab === 'new' ? 'tab-active' : '']}>最新</a>
+      </div>
+    </div>
+
+    <!-- Article list -->
+    {fetchError ? (
+      <p class="px-4 py-6 text-sm text-error">{fetchError}</p>
+    ) : (
+      <>
+        <div class="px-3 flex flex-col gap-3 pb-4">
+          {items.map((art) => (
+            <a href={art.href} class="card card-sm bg-base-100 shadow-sm block overflow-hidden">
+              <div class="flex gap-3 p-3">
+                <div class="flex-1 min-w-0">
+                  <span class="text-xs text-base-content/50">{art.sourceName}</span>
+                  <p class="text-[16px] lg:text-[18px] font-bold text-base-content leading-[1.4] mt-0.5 line-clamp-3" data-enc>{art.title}</p>
+                  <span class="text-xs text-base-content/50 mt-1 block" data-local-relative={art.dateValue}>{art.timeAgo}</span>
+                </div>
+                {art.imageUrl && (
+                  <img src={art.imageUrl} alt="" loading="lazy" class="w-32 aspect-4/3 object-cover shrink-0" />
+                )}
+              </div>
+            </a>
+          ))}
+        </div>
+
+        {totalPages > 1 && (
+          <div class="flex items-center justify-between px-4 pb-6">
+            {safePage > 1
+              ? <a href={pageUrl(safePage - 1)} class="text-sm text-primary font-semibold">← 上一頁</a>
+              : <span />
+            }
+            <span class="text-xs text-base-content/50">{safePage} / {totalPages}</span>
+            {safePage < totalPages
+              ? <a href={pageUrl(safePage + 1)} class="text-sm text-primary font-semibold">下一頁 →</a>
+              : <span />
+            }
+          </div>
+        )}
+      </>
+    )}
+
+  </main>
+</AppLayout>

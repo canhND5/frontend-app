@@ -1,0 +1,103 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import AppHeader from '@/components/AppHeader.astro';
+import { fetchOstayRecent } from '@/lib/ostay-api';
+import { encryptText } from '@/lib/aes';
+import { sourceDisplayName, timeAgo } from '@/lib/format';
+import { proxyImageUrl } from '@/lib/img-proxy';
+
+const aesKey = process.env.AES_SECRET_KEY ?? '';
+const PAGE_SIZE = 30;
+
+const page = Math.max(1, Number(Astro.url.searchParams.get('page') ?? '1'));
+
+let allItems: { rank: number; title: string; source: string; timeAgo: string; dateValue: string | null | undefined; href: string; imageUrl: string | null }[] = [];
+let error: string | null = null;
+
+try {
+  const { data } = await fetchOstayRecent(24);
+  allItems = await Promise.all(
+    data.items.map(async (item, i) => ({
+      rank: i + 1,
+      title: await encryptText(item.title, aesKey),
+      source: sourceDisplayName(item.source),
+      timeAgo: timeAgo(item.publishedAt ?? item.createdAt),
+      dateValue: item.publishedAt ?? item.createdAt,
+      href: `/content/${item.source}/${item.sourceItemId}`,
+      imageUrl: proxyImageUrl(item.imageUrl, item.source),
+    }))
+  );
+} catch (e) {
+  error = e instanceof Error ? e.message : String(e);
+}
+
+const totalPages = Math.ceil(allItems.length / PAGE_SIZE);
+const safePage = Math.min(page, totalPages || 1);
+const items = allItems.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+const rankColors = ['text-error', 'text-base-content/40', 'text-base-content/40'];
+
+Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=180, stale-while-revalidate=60');
+---
+
+<AppLayout title="今日最新" activeTab="home">
+  <div class="sticky top-0 z-40 shrink-0">
+    <AppHeader />
+    <div class="breadcrumbs text-sm bg-base-100 px-4 py-2 border-b border-base-300">
+      <ul>
+        <li><a href="/">首頁</a></li>
+        <li>今日最新</li>
+      </ul>
+    </div>
+  </div>
+
+  <main class="flex-1 overflow-y-auto pb-8">
+    <div class="px-3 pt-4 pb-1">
+      <div class="flex items-center justify-between mb-3">
+        <h1 class="text-sm font-bold text-base-content/70 uppercase tracking-wider">今日最新</h1>
+        {!error && <span class="text-xs text-base-content/50">共 {allItems.length} 條</span>}
+      </div>
+
+      {error ? (
+        <p class="py-6 text-sm text-error">{error}</p>
+      ) : (
+        <>
+          <div class="card bg-base-100 shadow-sm overflow-hidden">
+            <div class="divide-y divide-base-200">
+              {items.map((item, i) => (
+                <a href={item.href} class="flex items-center gap-3 px-4 py-3 hover:bg-base-200/50 transition-colors">
+                  <span class:list={['text-base font-black min-w-5 leading-none shrink-0 tabular-nums', rankColors[i] ?? 'text-base-content/40']}>
+                    {item.rank}
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[16px] lg:text-[18px] font-semibold leading-snug text-base-content line-clamp-2" data-enc>{item.title}</p>
+                    <div class="flex items-center gap-2 mt-1">
+                      <span class="text-xs text-base-content/50">{item.source}</span>
+                      <span class="text-xs text-base-content/40" data-local-relative={item.dateValue}>{item.timeAgo}</span>
+                    </div>
+                  </div>
+                  {item.imageUrl && (
+                    <img src={item.imageUrl} alt="" loading="lazy" class="w-32 aspect-4/3 object-cover shrink-0" />
+                  )}
+                </a>
+              ))}
+            </div>
+          </div>
+
+          {totalPages > 1 && (
+            <div class="flex items-center justify-between mt-4 px-1">
+              {safePage > 1
+                ? <a href={`/recent?page=${safePage - 1}`} class="text-sm text-primary font-semibold">← 上一頁</a>
+                : <span />
+              }
+              <span class="text-xs text-base-content/50">{safePage} / {totalPages}</span>
+              {safePage < totalPages
+                ? <a href={`/recent?page=${safePage + 1}`} class="text-sm text-primary font-semibold">下一頁 →</a>
+                : <span />
+              }
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  </main>
+</AppLayout>

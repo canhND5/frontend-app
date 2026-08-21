@@ -1,0 +1,168 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import AppHeader from '@/components/AppHeader.astro';
+import { fetchXPost } from '@/lib/proxy-api';
+import { encryptText } from '@/lib/aes';
+import { timeAgo } from '@/lib/format';
+import { proxyXImageUrl } from '@/lib/img-proxy';
+
+const { id } = Astro.params;
+const token = process.env.API_AUTH_TOKEN ?? '';
+const aesKey = process.env.AES_SECRET_KEY ?? '';
+
+let post = null;
+let error: string | null = null;
+let encText = '';
+let encQuotedText = '';
+
+try {
+  const { data } = await fetchXPost(token, id ?? '');
+  post = data;
+  const fullText = post.note_tweet?.text ?? post.text ?? '';
+  encText = await encryptText(fullText, aesKey);
+
+  const quotedRef = post.referencedPosts?.find(r => r.referenceType === 'quoted') ?? null;
+  if (quotedRef) {
+    encQuotedText = await encryptText(quotedRef.note_tweet?.text ?? quotedRef.text ?? '', aesKey);
+  }
+} catch (e) {
+  error = e instanceof Error ? e.message : String(e);
+}
+
+const retweetRef = post?.referencedPosts?.find(r => r.referenceType === 'retweeted') ?? null;
+const quotedRef = post?.referencedPosts?.find(r => r.referenceType === 'quoted') ?? null;
+const media = post?.media ?? [];
+const authorAvatarUrl = proxyXImageUrl(post?.author?.profile_image_url);
+
+function getVideoSrc(m: typeof media[0]): string | null {
+  // Video media uses variants[] not url; pick highest-bitrate MP4
+  const best = (m.variants ?? [])
+    .filter(v => v.content_type === 'video/mp4' && v.url)
+    .sort((a, b) => (b.bit_rate ?? 0) - (a.bit_rate ?? 0))[0];
+  if (best?.url) return proxyXImageUrl(best.url);
+  if (m.url) return proxyXImageUrl(m.url);
+  return null;
+}
+
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, s-maxage=1800');
+---
+
+<AppLayout title="貼文" activeTab="x">
+  <div class="sticky top-0 z-40 shrink-0">
+    <AppHeader showBack backHref="/x" />
+  </div>
+
+  <main class="flex-1 overflow-y-auto pb-8">
+    {error ? (
+      <div class="px-4 py-12 flex flex-col items-center text-center gap-3">
+        <p class="text-[16px] font-bold text-base-content">貼文無法載入</p>
+        <p class="text-sm text-base-content/50">請稍後再試</p>
+        <a href="/x" class="mt-2 text-sm text-primary font-semibold">← 返回 X</a>
+      </div>
+    ) : post ? (
+      <div class="px-4 pt-5">
+
+        <!-- Author -->
+        <div class="flex items-center gap-3 mb-4">
+          {authorAvatarUrl ? (
+            <img src={authorAvatarUrl} alt="" loading="eager" class="w-11 h-11 rounded-full object-cover shrink-0" />
+          ) : (
+            <div class="w-11 h-11 rounded-full bg-base-300 flex items-center justify-center text-base-content/60 font-bold shrink-0">
+              {post.author?.name?.charAt(0) ?? 'X'}
+            </div>
+          )}
+          <div>
+            <p class="font-bold text-base-content leading-tight">{post.author?.name}</p>
+            <p class="text-sm text-base-content/50">@{post.author?.username}</p>
+          </div>
+          {retweetRef && (
+            <span class="ml-auto text-xs text-base-content/40">↺ RT</span>
+          )}
+        </div>
+
+        <!-- Text -->
+        <p class="text-[17px] leading-[1.7] text-base-content mb-4" data-enc>{encText}</p>
+
+        <!-- Quoted post -->
+        {quotedRef && (
+          <div class="border border-base-300 rounded-xl p-3.5 bg-base-200/50 mb-4">
+            <div class="flex items-center gap-2 mb-1.5">
+              {quotedRef.author?.profile_image_url && (
+                <img src={proxyXImageUrl(quotedRef.author.profile_image_url) ?? ''} alt="" loading="lazy" class="w-5 h-5 rounded-full object-cover" />
+              )}
+              <span class="text-sm font-semibold text-base-content/70">{quotedRef.author?.name}</span>
+              <span class="text-sm text-base-content/40">@{quotedRef.author?.username}</span>
+            </div>
+            <p class="text-[15px] leading-[1.6] text-base-content/80" data-enc>{encQuotedText}</p>
+          </div>
+        )}
+
+        <!-- Media -->
+        {media.length > 0 && (
+          <div class:list={['mb-4', media.length === 1 ? 'flex flex-col gap-2' : 'grid grid-cols-2 gap-2']}>
+            {media.map((m) => {
+              const isVideo = m.type === 'video' || m.type === 'animated_gif';
+              const isGif = m.type === 'animated_gif';
+              const videoSrc = isVideo ? getVideoSrc(m) : null;
+              const thumbSrc = proxyXImageUrl(m.preview_image_url ?? (!isVideo ? m.url : null));
+              const fullImageSrc = !isVideo ? proxyXImageUrl(m.url ?? m.preview_image_url) : null;
+              if (isVideo && videoSrc) {
+                return (
+                  <div class="rounded-xl overflow-hidden bg-black aspect-video">
+                    <video
+                      src={videoSrc}
+                      poster={thumbSrc ?? undefined}
+                      controls={!isGif || undefined}
+                      autoplay={isGif || undefined}
+                      muted
+                      loop={isGif || undefined}
+                      playsinline
+                      class="w-full h-full object-contain"
+                    />
+                  </div>
+                );
+              }
+              return thumbSrc ? (
+                <div class="rounded-xl overflow-hidden bg-base-300 aspect-video">
+                  {fullImageSrc ? (
+                    <button
+                      type="button"
+                      data-image-preview
+                      data-full-src={fullImageSrc}
+                      data-image-alt={`${post.author?.name ?? 'X'} 的圖片`}
+                      aria-label="查看完整圖片"
+                      class="group relative block h-full w-full cursor-zoom-in"
+                    >
+                      <img src={thumbSrc} alt="" loading="lazy" class="h-full w-full object-cover" />
+                      <span class="absolute inset-0 flex items-center justify-center bg-black/10">
+                        <span class="rounded-full bg-black/60 p-2 text-white opacity-70 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-visible:opacity-100">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+                            <circle cx="11" cy="11" r="7" />
+                            <path stroke-linecap="round" d="M16.5 16.5L21 21M11 8v6M8 11h6" />
+                          </svg>
+                        </span>
+                      </span>
+                    </button>
+                  ) : (
+                    <img src={thumbSrc} alt="" loading="lazy" class="w-full h-full object-cover" />
+                  )}
+                </div>
+              ) : null;
+            })}
+          </div>
+        )}
+
+        <!-- Timestamp + metrics -->
+        <div class="border-t border-base-300 pt-3 mt-1">
+          <p class="text-sm text-base-content/40 mb-3" data-local-relative={post.created_at}>{timeAgo(post.created_at)}</p>
+          <div class="flex gap-5 text-sm text-base-content/60">
+            <span>↩ {(post.public_metrics?.reply_count ?? 0).toLocaleString()}</span>
+            <span>↺ {(post.public_metrics?.retweet_count ?? 0).toLocaleString()}</span>
+            <span>♡ {(post.public_metrics?.like_count ?? 0).toLocaleString()}</span>
+          </div>
+        </div>
+
+      </div>
+    ) : null}
+  </main>
+</AppLayout>

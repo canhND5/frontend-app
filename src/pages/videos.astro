@@ -1,0 +1,305 @@
+---
+import AppLayout from '@/layouts/AppLayout.astro';
+import AppHeader from '@/components/AppHeader.astro';
+import { fetchOstayGjwTopVideos, fetchOstayRecent } from '@/lib/ostay-api';
+import { fetchChannels } from '@/lib/channels';
+import { encryptText } from '@/lib/aes';
+import { sourceDisplayName, timeAgo } from '@/lib/format';
+import { formatDurationLabel } from '@/lib/proxy-utils';
+import { proxyImageUrl } from '@/lib/img-proxy';
+import { env } from 'cloudflare:workers';
+
+const aesKey = process.env.AES_SECRET_KEY ?? '';
+const channels = (await fetchChannels((env as Partial<Env>).CMS_MANIFEST)).slice(0, 10);
+const preselectedChannel = Astro.url.searchParams.get('ch') ?? 'all';
+
+type VideoItem = {
+  title: string;
+  imageUrl: string | null;
+  channelId: string;
+  source: string;
+  timeAgo: string;
+  dateValue: string | null | undefined;
+  duration: string;
+  href: string;
+};
+
+async function toVideoItem(item: { title: string; imageUrl: string | null; source: string; sourceItemId: string; publishedAt?: string | null; createdAt: string; channelId?: string | null; durationSeconds?: number }): Promise<VideoItem> {
+  return {
+    title: await encryptText(item.title, aesKey),
+    imageUrl: proxyImageUrl(item.imageUrl, item.source),
+    channelId: item.channelId ?? '',
+    source: sourceDisplayName(item.source),
+    timeAgo: timeAgo(item.publishedAt ?? item.createdAt),
+    dateValue: item.publishedAt ?? item.createdAt,
+    duration: formatDurationLabel(item.durationSeconds),
+    href: `/content/${item.source}/${item.sourceItemId}?kind=video`,
+  };
+}
+
+let hotItems: VideoItem[] = [];
+let hotError: string | null = null;
+
+try {
+  const { data } = await fetchOstayGjwTopVideos();
+  hotItems = await Promise.all(data.items.map(toVideoItem));
+} catch (e) {
+  hotError = e instanceof Error ? e.message : String(e);
+}
+
+// ── 最新 ─────────────────────────────────────────────────
+let newItems: VideoItem[] = [];
+let newError: string | null = null;
+
+try {
+  const { data } = await fetchOstayRecent(24, 'video');
+  newItems = await Promise.all(data.items.map(toVideoItem));
+} catch (e) {
+  newError = e instanceof Error ? e.message : String(e);
+}
+
+const initialCount = preselectedChannel === 'all'
+  ? hotItems.length
+  : hotItems.filter(v => v.channelId === preselectedChannel).length;
+
+Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=60');
+---
+
+<AppLayout title="視頻" activeTab="videos">
+  <div class="sticky top-0 z-40">
+    <AppHeader />
+  </div>
+
+  <main class="flex-1 overflow-y-auto">
+
+    <!-- Channel strip -->
+    <div class="px-3 pt-3 pb-1">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-bold text-base-content/70 uppercase tracking-wider">頻道</span>
+        <a href="/channels" class="text-sm text-primary font-semibold">全部頻道 →</a>
+      </div>
+      <div class="flex gap-2.5 overflow-x-auto pb-1 scrollbar-none">
+
+        <!-- 全部 -->
+        {(() => { const active = preselectedChannel === 'all'; return (
+          <button data-ch-btn="all" class:list={['flex flex-col items-center gap-1 shrink-0', active ? 'opacity-100' : 'opacity-70']}>
+            <div class:list={['w-11 h-11 rounded-full bg-base-300 flex items-center justify-center text-base-content/60 font-bold text-sm', active ? 'ring-2 ring-primary ring-offset-1' : '']}>
+              全
+            </div>
+            <span class:list={['text-[13px] whitespace-nowrap', active ? 'text-primary font-bold' : 'text-base-content/70']}>全部</span>
+          </button>
+        ); })()}
+
+        <!-- CMS channels -->
+        {channels.map((ch) => { const active = preselectedChannel === ch.id; return (
+          <button data-ch-btn={ch.id} class:list={['flex flex-col items-center gap-1 shrink-0', active ? 'opacity-100' : 'opacity-70']}>
+            {ch.avatarUrl ? (
+              <img
+                src={ch.avatarUrl}
+                alt={ch.name}
+                loading="eager"
+                class:list={['w-11 h-11 rounded-full object-cover', active ? 'ring-2 ring-primary ring-offset-1' : '']}
+              />
+            ) : (
+              <div class:list={['w-11 h-11 rounded-full bg-base-300 flex items-center justify-center text-base-content/60 font-bold text-sm', active ? 'ring-2 ring-primary ring-offset-1' : '']}>
+                {ch.name.charAt(0)}
+              </div>
+            )}
+            <span class:list={['text-[13px] whitespace-nowrap max-w-13 truncate', active ? 'text-primary font-bold' : 'text-base-content/70']}>{ch.name}</span>
+          </button>
+        ); })}
+      </div>
+    </div>
+
+    <!-- Sort bar -->
+    <div class="flex items-center justify-between px-3 pt-4 pb-2">
+      {!hotError && <span id="video-count" class="text-sm text-base-content/50">{initialCount} 支視頻</span>}
+      {hotError && <span />}
+      <div role="tablist" class="tabs tabs-boxed bg-base-200">
+        <button id="tab-hot" role="tab" class="tab tab-active tab-sm">最熱</button>
+        <button id="tab-new" role="tab" class="tab tab-sm">最新</button>
+      </div>
+    </div>
+
+    <!-- 最熱 container -->
+    <div id="section-hot">
+      {hotError ? (
+        <p class="px-4 py-6 text-sm text-error">{hotError}</p>
+      ) : (
+        <div id="list-hot" class="px-3 flex flex-col gap-3 pb-2">
+          {hotItems.map((v) => (
+            <a href={v.href} data-ch-id={v.channelId} class="card bg-base-100 shadow-sm overflow-hidden block">
+              <div class="relative aspect-video bg-linear-to-br from-[#1a1a2e] to-[#16213e] flex items-center justify-center overflow-hidden">
+                {v.imageUrl && (
+                  <img src={v.imageUrl} alt="" loading="lazy" class="absolute inset-0 w-full h-full object-cover" />
+                )}
+                <span class="relative z-10 w-10 h-10 bg-white/90 rounded-full flex items-center justify-center text-primary shadow">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 translate-x-0.5">
+                    <path fill-rule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clip-rule="evenodd" />
+                  </svg>
+                </span>
+                <span class="absolute top-2 left-2 bg-black/55 text-white text-[13px] font-bold px-1.5 py-px rounded-sm z-10">{v.source}</span>
+                {v.duration !== 'Live' && (
+                  <span class="absolute bottom-2 right-2 bg-black/65 text-white text-[13px] px-1.5 py-px rounded-sm z-10">{v.duration}</span>
+                )}
+              </div>
+              <div class="px-3 py-2.5">
+                <p class="text-[18px] lg:text-[20px] font-bold text-base-content leading-[1.4] line-clamp-2" data-enc>{v.title}</p>
+                <div class="flex items-center justify-end mt-1.5">
+                  <span class="text-sm text-base-content/50" data-local-relative={v.dateValue}>{v.timeAgo}</span>
+                </div>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
+      <div class="px-3 pb-4">
+        <button id="btn-hot-more" class="w-full py-2.5 text-sm text-primary font-semibold border border-primary/30 rounded-xl hover:bg-primary/5 transition-colors">載入更多</button>
+      </div>
+    </div>
+
+    <!-- 最新 container -->
+    <div id="section-new">
+      {newError ? (
+        <p id="list-new" class="px-4 py-6 text-sm text-error">{newError}</p>
+      ) : (
+        <div id="list-new" class="px-3 flex flex-col gap-3 pb-2">
+          {newItems.map((v) => (
+            <a href={v.href} data-ch-id={v.channelId} class="card bg-base-100 shadow-sm overflow-hidden block">
+              <div class="relative aspect-video bg-linear-to-br from-[#1a1a2e] to-[#16213e] flex items-center justify-center overflow-hidden">
+                {v.imageUrl && (
+                  <img src={v.imageUrl} alt="" loading="lazy" class="absolute inset-0 w-full h-full object-cover" />
+                )}
+                <span class="relative z-10 w-10 h-10 bg-white/90 rounded-full flex items-center justify-center text-primary shadow">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 translate-x-0.5">
+                    <path fill-rule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clip-rule="evenodd" />
+                  </svg>
+                </span>
+                <span class="absolute top-2 left-2 bg-black/55 text-white text-[13px] font-bold px-1.5 py-px rounded-sm z-10">{v.source}</span>
+                {v.duration !== 'Live' && (
+                  <span class="absolute bottom-2 right-2 bg-black/65 text-white text-[13px] px-1.5 py-px rounded-sm z-10">{v.duration}</span>
+                )}
+              </div>
+              <div class="px-3 py-2.5">
+                <p class="text-[18px] lg:text-[20px] font-bold text-base-content leading-[1.4] line-clamp-2" data-enc>{v.title}</p>
+                <div class="flex items-center justify-end mt-1.5">
+                  <span class="text-sm text-base-content/50" data-local-relative={v.dateValue}>{v.timeAgo}</span>
+                </div>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
+      <div class="px-3 pb-4">
+        <button id="btn-new-more" class="w-full py-2.5 text-sm text-primary font-semibold border border-primary/30 rounded-xl hover:bg-primary/5 transition-colors">載入更多</button>
+      </div>
+    </div>
+
+  </main>
+</AppLayout>
+
+<script is:inline define:vars={{ preselectedChannel }}>
+  const PAGE = 10;
+  const countEl = document.getElementById('video-count');
+  const tabHot = document.getElementById('tab-hot');
+  const tabNew = document.getElementById('tab-new');
+  const sectionHot = document.getElementById('section-hot');
+  const sectionNew = document.getElementById('section-new');
+  const listHot = document.getElementById('list-hot');
+  const listNew = document.getElementById('list-new');
+  const btnHotMore = document.getElementById('btn-hot-more');
+  const btnNewMore = document.getElementById('btn-new-more');
+
+  let activeTab = 'hot';
+  let activeChannel = preselectedChannel;
+  const shown = { hot: PAGE, new: PAGE };
+
+  sectionNew.style.display = 'none';
+
+  function allCards(tab) {
+    const list = tab === 'hot' ? listHot : listNew;
+    return list ? Array.from(list.querySelectorAll('[data-ch-id]')) : [];
+  }
+
+  function applyFilter(tab) {
+    const moreBtn = tab === 'hot' ? btnHotMore : btnNewMore;
+    let matched = 0;
+    allCards(tab).forEach(card => {
+      const matches = activeChannel === 'all' || card.dataset.chId === activeChannel;
+      card.style.display = matches && matched < shown[tab] ? '' : 'none';
+      if (matches) matched++;
+    });
+    const sectionVisible = (tab === 'hot' ? sectionHot : sectionNew).style.display !== 'none';
+    if (moreBtn) moreBtn.style.display = (sectionVisible && matched > shown[tab]) ? '' : 'none';
+    if (tab === activeTab && countEl) countEl.textContent = matched + ' 支視頻';
+  }
+
+  function activateChannel(chName) {
+    activeChannel = chName;
+    shown.hot = PAGE;
+    shown.new = PAGE;
+    document.querySelectorAll('[data-ch-btn]').forEach(b => {
+      const isActive = b.dataset.chBtn === chName;
+      b.classList.toggle('opacity-100', isActive);
+      b.classList.toggle('opacity-70', !isActive);
+      const img = b.querySelector('img');
+      const div = b.querySelector('div');
+      const span = b.querySelector('span');
+      img?.classList.toggle('ring-2', isActive);
+      img?.classList.toggle('ring-primary', isActive);
+      img?.classList.toggle('ring-offset-1', isActive);
+      div?.classList.toggle('ring-2', isActive);
+      div?.classList.toggle('ring-primary', isActive);
+      div?.classList.toggle('ring-offset-1', isActive);
+      if (span) {
+        span.classList.toggle('text-primary', isActive);
+        span.classList.toggle('font-bold', isActive);
+        span.classList.toggle('text-base-content/70', !isActive);
+      }
+    });
+    applyFilter('hot');
+    applyFilter('new');
+  }
+
+  tabHot.addEventListener('click', () => {
+    activeTab = 'hot';
+    sectionHot.style.display = '';
+    sectionNew.style.display = 'none';
+    tabHot.classList.add('tab-active');
+    tabNew.classList.remove('tab-active');
+    applyFilter('hot');
+  });
+
+  tabNew.addEventListener('click', () => {
+    activeTab = 'new';
+    sectionNew.style.display = '';
+    sectionHot.style.display = 'none';
+    tabNew.classList.add('tab-active');
+    tabHot.classList.remove('tab-active');
+    applyFilter('new');
+  });
+
+  btnHotMore.addEventListener('click', () => {
+    shown.hot += PAGE;
+    applyFilter('hot');
+  });
+
+  btnNewMore.addEventListener('click', () => {
+    shown.new += PAGE;
+    applyFilter('new');
+  });
+
+  document.querySelectorAll('[data-ch-btn]').forEach(btn => {
+    btn.addEventListener('click', () => activateChannel(btn.dataset.chBtn));
+  });
+
+  // Initial render
+  applyFilter('hot');
+  applyFilter('new');
+  if (preselectedChannel !== 'all') activateChannel(preselectedChannel);
+</script>
+
+<style>
+  .scrollbar-none { scrollbar-width: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+</style>

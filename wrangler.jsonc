@@ -1,0 +1,27 @@
+{
+	"account_id": "12881a60f888bb43390546361ebfe704",
+	"compatibility_date": "2026-03-10",
+	"compatibility_flags": ["global_fetch_strictly_public", "nodejs_compat"],
+	"name": "astro-app",
+	"main": "@astrojs/cloudflare/entrypoints/server",
+	"secrets": {
+		"required": ["AES_SECRET_KEY", "API_AUTH_TOKEN", "OSTAY_API_KEY"]
+	},
+	"assets": {
+		"directory": "./dist",
+		"binding": "ASSETS"
+	},
+	"r2_buckets": [
+		{
+			"binding": "CMS_MANIFEST",
+			"bucket_name": "pg-cms-manifest"
+		},
+		{
+			"binding": "BOOK_FILES",
+			"bucket_name": "pg-book-files"
+		}
+	],
+	"observability": {
+		"enabled": true
+	}
+}

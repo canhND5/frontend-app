@@ -1,0 +1,49 @@
+---
+interface Item {
+  rank: number;
+  title: string;
+  source: string;
+  timeAgo: string;
+  href: string;
+  imageUrl: string | null;
+  dateValue?: string;
+}
+
+interface Props {
+  items: Item[];
+}
+
+const { items } = Astro.props;
+---
+
+<section class="px-3 pt-4 pb-2">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-sm font-bold text-base-content/70 uppercase tracking-wider">今日最新</h2>
+    <a href="/recent" class="text-sm text-primary font-semibold">更多 →</a>
+  </div>
+
+  <div class="card bg-base-100 shadow-sm">
+    <div class="divide-y divide-base-200">
+      {items.map((item, i) => (
+        <a href={item.href} class="flex items-center gap-3 px-4 py-3 hover:bg-base-200/50 transition-colors">
+          <span class:list={[
+            'text-base font-black min-w-5 leading-none shrink-0 tabular-nums',
+            i === 0 ? 'text-error' : 'text-base-content/40',
+          ]}>
+            {item.rank}
+          </span>
+          <div class="flex-1 min-w-0">
+            <p class="text-[16px] lg:text-[18px] font-semibold leading-snug text-base-content line-clamp-2" data-enc>{item.title}</p>
+            <div class="flex items-center gap-2 mt-1">
+              <span class="text-xs text-base-content/50">{item.source}</span>
+              <span class="text-xs text-base-content/40" data-local-relative={item.dateValue}>{item.timeAgo}</span>
+            </div>
+          </div>
+          {item.imageUrl && (
+            <img src={item.imageUrl} alt="" loading="lazy" class="w-32 aspect-4/3 object-cover shrink-0" />
+          )}
+        </a>
+      ))}
+    </div>
+  </div>
+</section>
